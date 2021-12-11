@@ -1,0 +1,15 @@
+[Unit]
+Description=System Watchdog Daemon
+DefaultDependencies=no
+After=multi-user.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/opt/system_watchdog/system_watchdog.py
+Restart=always
+RestartSec=1
+User=pi
+
+[Install]
+WantedBy=multi-user.target
