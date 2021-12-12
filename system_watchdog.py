@@ -17,7 +17,7 @@ from typing import Tuple, Dict, Any, Callable
 
 MAJOR = 1
 MINOR = 2
-PATCH = 1
+PATCH = 2
 version = "%i.%i.%i" % (MAJOR, MINOR, PATCH)
 
 # Defaults for values in the general section
@@ -335,13 +335,16 @@ def connectivity_check(section: str, config: ConfigParser) -> int:
     # This implementation is Linux-specific
     ip_address = config[config[TYPE]];
 
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect((ip_address, 1))  # connect() for UDP doesn't send packets
-    local_ip_address = s.getsockname()[0]
-    if local_ip_address != "0.0.0.0":
-        # success
-        logging.debug("%s: Local ip address is %s" % (section, local_ip_address))
-        return 0
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect((ip_address, 1))  # connect() for UDP doesn't send packets
+        local_ip_address = s.getsockname()[0]
+        if local_ip_address != "0.0.0.0":
+            # success
+            logging.debug("%s: Local ip address is %s" % (section, local_ip_address))
+            return 0
+    except:
+        pass
     # we could not get a local ip address
     logging.debug("%s: No local ip address can be acquired." % section)
     return 1
