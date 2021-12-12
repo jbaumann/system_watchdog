@@ -33,7 +33,7 @@ up and running. If none of the interfaces is up, then the *repair* action is exe
 
 For other types see the [Wiki](../../wiki).
 
-# The General Section
+# The [general] Section
 In addition to the specific configurations one general section allows to define default values e.g., for the
 *fallback action*, the *timeout* or the *sleep time*. Here is a simple example:
 ```
