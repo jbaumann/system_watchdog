@@ -16,7 +16,7 @@ import threading
 from typing import Tuple, Dict, Any, Callable
 
 MAJOR = 1
-MINOR = 1
+MINOR = 2
 PATCH = 1
 version = "%i.%i.%i" % (MAJOR, MINOR, PATCH)
 
@@ -212,6 +212,11 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
         timeout = int(config[TIME_OUT])
     else:
         timeout = general_config[TIME_OUT]
+
+    if SLEEP_TIME in config:
+        sleeptime = int(config[SLEEP_TIME])
+    else:
+        sleeptime = general_config[SLEEP_TIME]
     
     # verify the command and repair option are set in the config
     msg = "%s: No '%s' option given."
@@ -243,7 +248,7 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                 logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[config[TYPE]]))
 
             if return_code != 0:
-                last_success += general_config[SLEEP_TIME]
+                last_success += sleeptime
                 logging.debug("%s: check %s unsuccessful. Last success: %i" 
                         % (section, config[TYPE], last_success))
             else:
@@ -252,7 +257,7 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                 logging.debug("%s: check %s successful." 
                         % (section, config[TYPE]))
 
-            time.sleep(general_config[SLEEP_TIME])
+            time.sleep(sleeptime)
 
         # Timeout has been reached. If we haven't tried to repair the
         # service yet, then we try the given repair statement
@@ -347,11 +352,11 @@ def connectivity_check(section: str, config: ConfigParser) -> int:
 # a function (function pointer), 
 # or a string to print
 entry_type_implementation = {
-    "command" : { COMMAND : command_check, REPAIR : generic_repair },
-    "script"  : { COMMAND : command_check, REPAIR : generic_repair },
-    "network" : { COMMAND : network_check, REPAIR : generic_repair },
+    "command"      : { COMMAND : command_check, REPAIR : generic_repair },
+    "script"       : { COMMAND : command_check, REPAIR : generic_repair },
+    "network"      : { COMMAND : network_check, REPAIR : generic_repair },
     "connectivity" : { COMMAND : connectivity_check, REPAIR : generic_repair },
-    "device"  : "Entry type not implemented yet",
+    "device"       : "Entry type not implemented yet",
 }
 
 if __name__ == '__main__':
