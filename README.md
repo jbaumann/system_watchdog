@@ -43,18 +43,19 @@ In addition to the specific configurations one general section allows to define 
 version = 1
 ; Decides which actions are actually executed
 ; "unprimed" or 0 - no action
-; "repair_only" or 1 - only repair action
-; "fully primed" or 2 - all actions
-primed = repair only
+; "check" or 1 - only check action
+; "repair" or 2 - check and repair action
+; "fully primed" or 3 - all actions
+primed = unprimed
 ; This is the fallback action that is executed if repairing
 ; was unsuccessful. Can be overwritten in specific configurations
 fallback action = sudo reboot
 loglevel = DEBUG
 ; The daemon sleeps between checks for this time in seconds
-sleep time = 10
+sleep time = 20
 ; The default timeout for determining whether repair is necessary.
 ; Can be overwritten in individual configurations.
-timeout = 30
+timeout = 60
 ```
 
 # Limitations
