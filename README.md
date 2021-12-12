@@ -59,4 +59,4 @@ timeout = 60
 ```
 
 # Limitations
-Currently the script is limited to Linux-type operating systems. Getting rid of this limitation would mean that we have to install additional python packages with 'pip3', which I'm trying to avoid for the time being.
+Currently the script is limited to Linux-type operating systems. Getting rid of this limitation would mean that we have to install additional python packages with 'pip3', which I try to avoid for the time being.
