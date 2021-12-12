@@ -7,10 +7,10 @@ See the [Wiki](../../wiki) for detailed explanations.
 
 # How does it work?
 A python daemon installed as a system service checks different system aspects according to a configuration file. 
-The file contains different configuration that each define commands to check that something still runs as needed, 
+The file contains different configurations that each define commands to check that something still runs as needed, 
 and if this is not the case, defines a command to be executed to repair it.
 
-# The Configuration file
+# The Configurations
 In the configuration file you have different types of configuration that can be used to implement the checks, two are used in
 the following example (*command* and *network*):
 ```
@@ -28,8 +28,8 @@ repair = sudo systemctl restart networking
 ```
 The *command* type allows to define a command that is used to check whether something works.
 In our example we use a ping to an IP address, and as long as that works, the service
-is ok. If this does not work for the defined *timeout*, the *repair* action is executed i.e., 
-the network is restarted.
+is ok. If this does not work for the defined *timeout*, the *repair* action is executed,
+which in this example means that the network is restarted.
 
 The *network* type allows to check that at least one of the given network interfaces is
 up and running. If none of the interfaces is up, then the *repair* action is executed.
