@@ -2,6 +2,9 @@
 A watchdog service for Linux that monitors applications,services network connections and other things.
 See the [Wiki](../../wiki) for detailed explanations.
 
+# A short Walkthrough for the Impatient
+[Walkthrough:-Installing-the-System_Watchdog-in-8-easy-steps](../../wiki/Walkthrough:-Installing-the-System_Watchdog-in-8-easy-steps)
+
 # How does it work?
 A python daemon installed as a system service checks different system aspects according to a configuration file. 
 The file contains different configuration that each define commands to check that something still runs as needed, 
