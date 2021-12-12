@@ -42,12 +42,14 @@ general_config = {
 
 # Values for mapping the different primed levels to numerical values
 UNPRIMED = "unprimed"
-REPAIR_ONLY = "repair only"
+CHECK_ONLY = "check"
+REPAIR_ONLY = "repair"
 FULLY_PRIMED = "fully primed"
 primed_level = {
     UNPRIMED : 0,
-    REPAIR_ONLY : 1,
-    FULLY_PRIMED : 2,
+    CHECK_ONLY : 1,
+    REPAIR_ONLY : 2,
+    FULLY_PRIMED : 3,
 }
 
 def main(*args: Tuple[str]):
@@ -232,7 +234,13 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                 return
             # As long as the callback for the check command
             # returns 0 everything is hunky dory
-            return_code = callback[COMMAND](section, config)
+
+            return_code = 0
+            if general_config[PRIMED] >= primed_level[CHECK_ONLY]:
+                logging.debug("%s: Executing '%s'" % (section, config[config[TYPE]]))
+                return_code = callback[COMMAND](section, config)
+            else:
+                logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[config[TYPE]]))
 
             if return_code != 0:
                 last_success += general_config[SLEEP_TIME]
