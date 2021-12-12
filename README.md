@@ -11,7 +11,7 @@ The file contains different configuration that each define commands to check tha
 and if this is not the case, defines a command to be executed to repair it.
 
 # The Configuration file
-In the configuration file you have different types of checks that can be used to implement the checks, two are used in
+In the configuration file you have different types of configuration that can be used to implement the checks, two are used in
 the following example (*command* and *network*):
 ```
 [cmd]
