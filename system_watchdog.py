@@ -16,8 +16,8 @@ import threading
 from typing import Tuple, Dict, Any, Callable, List
 
 MAJOR = 1
-MINOR = 2
-PATCH = 2
+MINOR = 3
+PATCH = 1
 version = "%i.%i.%i" % (MAJOR, MINOR, PATCH)
 
 # Defaults for values in the general section
