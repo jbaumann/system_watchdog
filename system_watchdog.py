@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 import threading
-from typing import Tuple, Dict, Any, Callable
+from typing import Tuple, Dict, Any, Callable, List
 
 MAJOR = 1
 MINOR = 2
@@ -28,8 +28,6 @@ LOG_LEVEL = "loglevel"
 SLEEP_TIME = "sleep time"
 TIME_OUT = "timeout"
 TYPE = "type"
-COMMAND = "command"
-REPAIR = "repair"
 VERSION = "version"
 general_config = {
     PRIMED : 0,
@@ -39,6 +37,22 @@ general_config = {
     TIME_OUT : 120,
     VERSION : -1,
 }
+
+# Values for the entries of the different configurations
+COMMAND = "command"
+SERVER = "server"
+PORT = "port"
+TOPIC = "topic"
+CREDENTIALS = "credentials"
+USER = "user"
+PASSWORD = "password"
+
+# Values for the dictionary that provides implementations for
+# preparation, check and repair action
+PREP   = "prep"
+CHECK  = "check"
+REPAIR = "repair"
+
 
 # Values for mapping the different primed levels to numerical values
 UNPRIMED = "unprimed"
@@ -52,10 +66,15 @@ primed_level = {
     FULLY_PRIMED : 3,
 }
 
-def main(*args: Tuple[str]):
+# Prerequisites for different configuration types
+mqtt_import_available = False
+psutil_import_available = False
+
+def main(cmd_args: List[str]):
+
     # Startup of the daemon
 
-    args = parse_cmdline(args)
+    args = parse_cmdline(cmd_args)
     setup_logger(args.nodaemon)
     logging.debug("Setup complete")
 
@@ -77,6 +96,9 @@ def main(*args: Tuple[str]):
             logging.error(err)
             logging.error("Cannot read config file. Aborting.")
             quit(1)
+
+    # Check the needed packages and set global variables accordingly
+    check_prerequisites()
 
     # Now interpret the config file
     # We should have one section that configures general values.
@@ -150,16 +172,19 @@ def main(*args: Tuple[str]):
         # the main thread is always part of the active threads
         while threading.active_count() > 1:
             thread_names = ""
+            thread_count = 0
             for thread in threading.enumerate():
-                if thread.name != "MainThread":
+                # We are filtering the main thread and unnamed threads
+                if thread.name != "MainThread" and not thread.name.startswith("Thread-"):
                     thread_names = thread_names + "'" + thread.name + "' "
-            logging.debug("Active Configurations: %i - %s" % (threading.active_count() - 1, thread_names) )
+                    thread_count += 1
+            logging.debug("Active Configurations: %i - %s" % (thread_count, thread_names) )
             time.sleep(general_config[SLEEP_TIME])
     except KeyboardInterrupt:
         logging.info("Terminating: cleaning up and exiting - configurations will exit after sleep time")
 
 # Helper Functions and Classes
-def parse_cmdline(args: Tuple[str]) -> Namespace:
+def parse_cmdline(args: List[str]) -> Namespace:
     arg_parser = ArgumentParser(description='System Watchdog v' + version)
     arg_parser.add_argument('--cfgfile', metavar='file', required=False,
                             help='full path and name of the configfile')
@@ -201,6 +226,31 @@ class SystemdHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
+def check_prerequisites() -> None:
+    global mqtt_import_available
+    global psutil_import_available
+
+    # Paho MQTT package
+    try:
+        #import paho.mqtt.client as mqtt
+        import paho.mqtt.subscribe as subscribe
+        mqtt_import_available = True
+        logging.debug("Optional MQTT package found.")
+    except ImportError or ModuleNotFoundError:
+        logging.debug("No MQTT implementation found. Use 'pip3 install paho-mqtt' to install.")
+        logging.debug("Continuing without MQTT support.")
+        pass
+
+    # PSUtil package
+    try:
+        import psutil
+        psutil_import_available = True
+        logging.debug("Optional PSUtil package found.")
+    except ImportError or ModuleNotFoundError:
+        logging.debug("PSUtil not found. Use 'pip3 install psutil' to install.")
+        logging.debug("Continuing without PSUtil support.")
+        pass
+
 # Generic thread implementations for the different watchdog entries
 # This is used if a dict of callbacks is used in the entry_type_implementation
 def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParser) -> None:
@@ -227,73 +277,97 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
         fix_available = False
         logging.info((msg + " Using global fallback.") % (section, REPAIR))
 
+    # check preparation code if available
+    if PREP in callback:
+        logging.debug(("Preparation code found for configuration %s") % section)
+        if not callback[PREP](section, config):
+            logging.warning(("Preparation unsuccessful for configuration %s. Ignoring this configuration.") % section)
+            return
+
     # main loop for the thread. Runs indefinitely
-    while True:
-        # Check until the timeout whether the check command can be
-        # executed successfully
-        while last_success < timeout:
-            # Check whether main thread still runs. If not, terminate.
-            main_alive = threading.main_thread().is_alive()
-            if not main_alive:
-                logging.info("Configuration '%s' terminating." % section)
-                return
-            # As long as the callback for the check command
-            # returns 0 everything is hunky dory
+    try:
+        while True:
+            # Check until the timeout whether the check command can be
+            # executed successfully
+            while last_success < timeout:
+                # Check whether main thread still runs. If not, terminate.
+                main_alive = threading.main_thread().is_alive()
+                if not main_alive:
+                    logging.info("Configuration '%s' terminating." % section)
+                    return
+                # As long as the callback for the check command
+                # returns 0 everything is hunky dory
 
-            return_code = 0
-            if general_config[PRIMED] >= primed_level[CHECK_ONLY]:
-                logging.debug("%s: Executing '%s'" % (section, config[config[TYPE]]))
-                return_code = callback[COMMAND](section, config)
-            else:
-                logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[config[TYPE]]))
+                return_code = 0
+                if general_config[PRIMED] >= primed_level[CHECK_ONLY]:
+                    logging.debug("%s: Checking '%s'" % (section, config[config[TYPE]]))
+                    return_code = callback[CHECK](section, config)
+                else:
+                    logging.debug("%s: Not checking '%s'. Primed value too low." % (section, config[config[TYPE]]))
 
-            if return_code != 0:
-                last_success += sleeptime
-                logging.debug("%s: check %s unsuccessful. Last success: %i" 
-                        % (section, config[TYPE], last_success))
+                if return_code == 1:
+                    # Check was unsuccessful
+                    last_success += sleeptime
+                    logging.debug("%s: check %s unsuccessful. Last success: %i" 
+                            % (section, config[TYPE], last_success))
+                elif return_code == 2:
+                    # Check was unsuccessful and took sleeptime to check
+                    last_success += 2 * sleeptime
+                    logging.debug("%s: check %s unsuccessful and needed some time. Last success: %i" 
+                            % (section, config[TYPE], last_success))
+                elif return_code == 3:
+                    # Check was unsuccessful and took sleetimeoutptime to check
+                    last_success += timeout
+                    logging.debug("%s: check %s unsuccessful, let to a timeout." 
+                            % (section, config[TYPE]))
+                    break
+                else:
+                    last_success = 0
+                    tried_fix = False
+                    logging.debug("%s: check %s successful." 
+                            % (section, config[TYPE]))
+
+                time.sleep(sleeptime)
+
+            # Timeout has been reached. If we haven't tried to repair the
+            # service yet, then we try the given repair statement
+            # After executing this statement timers are set back to 0 and
+            # we try the check command again until another timeout is reached
+            if not tried_fix and fix_available:
+                last_success = 0
+                tried_fix = True
+                logging.warning("%s: Trying to repair with '%s'" % (section, config[REPAIR]))
+                return_code = 0
+                if general_config[PRIMED] >= primed_level[REPAIR_ONLY]:
+                    logging.debug("%s: Executing '%s'" % (section, config[REPAIR]))
+                    return_code = callback[REPAIR](section, config)
+                else:
+                    logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[REPAIR]))
+
+                if return_code != 0:
+                    logging.warning("%s: repair '%s' unsuccessful" % (section, config[REPAIR]))
+                else:
+                    logging.info("%s: repair '%s' successful" % (section, config[REPAIR]))
+
             else:
+                # Timeout has been reached twice, the repair was unsuccessful,
+                # and now we try the fallback action.
                 last_success = 0
                 tried_fix = False
-                logging.debug("%s: check %s successful." 
-                        % (section, config[TYPE]))
+                logging.warning("%s: Trying fallback action '%s'" 
+                            % (section, config[FALLBACK_ACTION]))
 
-            time.sleep(sleeptime)
-
-        # Timeout has been reached. If we haven't tried to repair the
-        # service yet, then we try the given repair statement
-        # After executing this statement timers are set back to 0 and
-        # we try the check command again until another timeout is reached
-        if not tried_fix and fix_available:
-            last_success = 0
-            tried_fix = True
-            logging.warning("%s: Trying to repair with '%s'" % (section, config[REPAIR]))
-            return_code = 0
-            if general_config[PRIMED] >= primed_level[REPAIR_ONLY]:
-                logging.debug("%s: Executing '%s'" % (section, config[REPAIR]))
-                return_code = callback[REPAIR](section, config)
-            else:
-                logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[REPAIR]))
-
-            if return_code != 0:
-                logging.warning("%s: repair '%s' unsuccessful" % (section, config[REPAIR]))
-            else:
-                logging.info("%s: repair '%s' successful" % (section, config[REPAIR]))
-
-        else:
-            # Timeout has been reached twice, the repair was unsuccessful,
-            # and now we try the fallback action.
-            last_success = 0
-            tried_fix = False
-            logging.warning("%s: Trying fallback action '%s'" 
-                        % (section, config[FALLBACK_ACTION]))
-
-            if general_config[PRIMED] >= primed_level[FULLY_PRIMED]:
-                cp = subprocess.run(shlex.split(config[FALLBACK_ACTION]), capture_output=True)
-                if cp.returncode != 0:
-                    logging.warning("%s: Fallback action '%s' unsuccessful" 
-                                % (section, config[FALLBACK_ACTION]))
-            else:
-                logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[FALLBACK_ACTION]))
+                if general_config[PRIMED] >= primed_level[FULLY_PRIMED]:
+                    cp = subprocess.run(shlex.split(config[FALLBACK_ACTION]), capture_output=True)
+                    if cp.returncode != 0:
+                        logging.warning("%s: Fallback action '%s' unsuccessful" 
+                                    % (section, config[FALLBACK_ACTION]))
+                else:
+                    logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[FALLBACK_ACTION]))
+    except:
+        # if there was an exception we terminate this configuration
+        logging.debug("%s: Exception occurred. Terminating" % section)
+        pass
 
 # Implementation of the Callbacks
 def generic_repair(section: str, config: ConfigParser) -> int:
@@ -349,18 +423,101 @@ def connectivity_check(section: str, config: ConfigParser) -> int:
     logging.debug("%s: No local ip address can be acquired." % section)
     return 1
 
+# Implementation of the MQTT callbacks
+def mqtt_prep(section: str, config: ConfigParser) -> bool:
+    if not mqtt_import_available:
+        logging.warning("%s: No MQTT implementation found. Use 'pip3 install paho-mqtt' to install." % section)
+        return False
+    if not SERVER in config:
+        logging.warning("%s: No '%s' option given. Aborting." % (section, SERVER))
+        return False
+    try:
+        server_ip = socket.getaddrinfo(config[SERVER], 1883)
+    except:
+        logging.warning("%s: Server name '%s' cannot be found. Aborting." % (section, config[SERVER]))
+        return False
+
+    if not TOPIC in config:
+        logging.warning("%s: No '%s' option given. Aborting." % (section, TOPIC))
+        return False
+    # config[TYPE] has already been checked
+    if not config[config[TYPE]] in config:
+        logging.warning("%s: No '%s' option given. Aborting." % (section, config[config[TYPE]]))
+        return False
+    # Do we have a credentials file?
+    if CREDENTIALS in config:
+        credentials = str(Path(__file__).parent.absolute()) + "/" + config[CREDENTIALS]
+        try:
+            with open (credentials, "r") as cred:
+                lines = []
+                for line in cred:
+                    line = line.partition(";")[0].strip(" \n\t");
+                    if line != "":
+                        lines.append(line)
+                config[USER] = lines[0]
+                config[PASSWORD] = lines[1]
+        except:
+            pass
+    return True
+
+def mqtt_check(section: str, config: ConfigParser) -> int:
+    import my_mqtt_subscribe as subscribe
+
+    port = 1883
+    if PORT in config:
+        try:
+            port = int(config[port])
+        except:
+            pass
+
+    if TIME_OUT in config:
+        timeout = int(config[TIME_OUT])
+    else:
+        timeout = general_config[TIME_OUT]
+
+    if ',' in config[TOPIC]:
+        topics = [ s.strip() for s in config[TOPIC].split(',')]
+    else:
+        topics = config[TOPIC]
+
+    auth = None
+    if USER in config:
+        auth = []
+        auth['username'] = config[USER]
+        if PASSWORD in config:
+            auth['password'] = config[PASSWORD]
+
+    try:
+        logging.debug("Connecting to MQTT server %s:%i" %(config[SERVER], port))
+        m = subscribe.simple(topics, hostname=config[SERVER], retained=True, timeout=timeout, auth=auth)
+        if m != None:
+            logging.debug("%s: Received MQTT message: '%s'" % (section, m.payload))
+            return 0
+        else:
+            logging.debug("%s: Received no MQTT message until timeout of %is" % (section, timeout))
+    except Exception as e:
+        logging.warning("%s: MQTT error occurred: %s" % (section, e))
+        raise
+    return 3
+
+
+# Implementation of the PSUtil callbacks
+def psutil_prep(section: str, config: ConfigParser) -> bool:
+    return psutil_import_available
+
 # Implementation mapping
 # This table provides the mapping from the type of the configuration to
 # the implementation of either the callbacks (in a dict), 
 # a function (function pointer), 
 # or a string to print
 entry_type_implementation = {
-    "command"      : { COMMAND : command_check, REPAIR : generic_repair },
-    "script"       : { COMMAND : command_check, REPAIR : generic_repair },
-    "network"      : { COMMAND : network_check, REPAIR : generic_repair },
-    "connectivity" : { COMMAND : connectivity_check, REPAIR : generic_repair },
+    "command"      : { CHECK : command_check, REPAIR : generic_repair },
+    "script"       : { CHECK : command_check, REPAIR : generic_repair },
+    "network"      : { CHECK : network_check, REPAIR : generic_repair },
+    "connectivity" : { CHECK : connectivity_check, REPAIR : generic_repair },
+    "mqtt"         : { PREP : mqtt_prep, CHECK : mqtt_check, REPAIR : generic_repair },
     "device"       : "Entry type not implemented yet",
 }
 
 if __name__ == '__main__':
-    main(*sys.argv[1:])
+    main(sys.argv[1:])
