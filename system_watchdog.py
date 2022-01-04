@@ -4,6 +4,7 @@
 
 from argparse import ArgumentParser, Namespace
 from configparser import ConfigParser
+import importlib
 import logging
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ import threading
 from typing import Tuple, Dict, Any, Callable, List
 
 MAJOR = 1
-MINOR = 3
+MINOR = 5
 PATCH = 1
 version = "%i.%i.%i" % (MAJOR, MINOR, PATCH)
 
@@ -52,6 +53,7 @@ PASSWORD = "password"
 PREP   = "prep"
 CHECK  = "check"
 REPAIR = "repair"
+FALLBACK = "fallback"
 
 
 # Values for mapping the different primed levels to numerical values
@@ -66,6 +68,8 @@ primed_level = {
     FULLY_PRIMED : 3,
 }
 
+# Plug-in related definitions
+PLUGIN_DIR = "plugins"
 # Prerequisites for different configuration types
 mqtt_import_available = False
 psutil_import_available = False
@@ -141,6 +145,20 @@ def main(cmd_args: List[str]):
             config[section][FALLBACK_ACTION] = general_config[FALLBACK_ACTION]
 
         section_type = config[section][TYPE]
+        if section_type not in entry_type_implementation:
+            # try to load module
+            try:
+                module = importlib.import_module('.' + section_type, package=PLUGIN_DIR)
+                register_method = getattr(module, 'register')
+                entry = register_method(section_type)
+                if entry:
+                    entry_type_implementation[section_type] = entry
+                    logging.debug("%s: Import of module '%s' successful" % (section, section_type))
+                else:
+                    logging.warn("%s: Registering of module '%s' unsuccessful" % (section, section_type))
+            except Exception as e:
+                logging.debug("%s: Import of module '%s' unsuccessful: %s" % (section, section_type, e))
+                pass
         if section_type in entry_type_implementation:
             # We have an implementation for the current entry
             entry = entry_type_implementation[section_type]
@@ -178,7 +196,7 @@ def main(cmd_args: List[str]):
                 if thread.name != "MainThread" and not thread.name.startswith("Thread-"):
                     thread_names = thread_names + "'" + thread.name + "' "
                     thread_count += 1
-            logging.debug("Active Configurations: %i - %s" % (thread_count, thread_names) )
+            logging.debug(" %i Active Configurations: %s" % (thread_count, thread_names) )
             time.sleep(general_config[SLEEP_TIME])
     except KeyboardInterrupt:
         logging.info("Terminating: cleaning up and exiting - configurations will exit after sleep time")
@@ -295,9 +313,9 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                 if not main_alive:
                     logging.info("Configuration '%s' terminating." % section)
                     return
+
                 # As long as the callback for the check command
                 # returns 0 everything is hunky dory
-
                 return_code = 0
                 if general_config[PRIMED] >= primed_level[CHECK_ONLY]:
                     logging.debug("%s: Checking '%s'" % (section, config[config[TYPE]]))
@@ -305,10 +323,11 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                 else:
                     logging.debug("%s: Not checking '%s'. Primed value too low." % (section, config[config[TYPE]]))
 
+                # Examine the possible return codes
                 if return_code == 1:
                     # Check was unsuccessful
                     last_success += sleeptime
-                    logging.debug("%s: check %s unsuccessful. Last success: %i" 
+                    logging.debug("%s: check %s unsuccessful. Last success: %i"
                             % (section, config[TYPE], last_success))
                 elif return_code == 2:
                     # Check was unsuccessful and took sleeptime to check
@@ -324,9 +343,10 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                 else:
                     last_success = 0
                     tried_fix = False
-                    logging.debug("%s: check %s successful." 
+                    logging.debug("%s: Check %s successful."
                             % (section, config[TYPE]))
 
+                logging.debug("%s: Now sleeping for %ss." % (section, sleeptime))
                 time.sleep(sleeptime)
 
             # Timeout has been reached. If we haven't tried to repair the
@@ -340,7 +360,11 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                 return_code = 0
                 if general_config[PRIMED] >= primed_level[REPAIR_ONLY]:
                     logging.debug("%s: Executing '%s'" % (section, config[REPAIR]))
-                    return_code = callback[REPAIR](section, config)
+                    if REPAIR in callback:
+                        return_code = callback[REPAIR](section, config)
+                    else:
+                        return_code = generic_execute(section, config)
+
                 else:
                     logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[REPAIR]))
 
@@ -354,23 +378,28 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                 # and now we try the fallback action.
                 last_success = 0
                 tried_fix = False
-                logging.warning("%s: Trying fallback action '%s'" 
-                            % (section, config[FALLBACK_ACTION]))
 
                 if general_config[PRIMED] >= primed_level[FULLY_PRIMED]:
-                    cp = subprocess.run(shlex.split(config[FALLBACK_ACTION]), capture_output=True)
-                    if cp.returncode != 0:
+                    logging.warning("%s: Trying fallback action '%s'"
+                            % (section, config[FALLBACK_ACTION]))
+
+                    if FALLBACK_ACTION in callback:
+                        return_code = callback[FALLBACK_ACTION](section, config)
+                    else:
+                        return_code = generic_execute(section, config)
+
+                    if return_code != 0:
                         logging.warning("%s: Fallback action '%s' unsuccessful" 
                                     % (section, config[FALLBACK_ACTION]))
                 else:
                     logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[FALLBACK_ACTION]))
-    except:
+    except Exception as e:
         # if there was an exception we terminate this configuration
-        logging.debug("%s: Exception occurred. Terminating" % section)
+        logging.debug("%s: Exception occurred. Terminating: %s" % (section, e))
         pass
 
 # Implementation of the Callbacks
-def generic_repair(section: str, config: ConfigParser) -> int:
+def generic_execute(section: str, config: ConfigParser) -> int:
     cp = subprocess.run(shlex.split(config[REPAIR]), capture_output=True)
     return cp.returncode
 
@@ -407,10 +436,11 @@ def network_check(section: str, config: ConfigParser) -> int:
 # Implementation of the Connectivity Callbacks
 def connectivity_check(section: str, config: ConfigParser) -> int:
     # This implementation is Linux-specific
-    ip_address = config[config[TYPE]];
+    ip_address = config[config[TYPE]]
 
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
         s.connect((ip_address, 1))  # connect() for UDP doesn't send packets
         local_ip_address = s.getsockname()[0]
         if local_ip_address != "0.0.0.0":
@@ -507,16 +537,15 @@ def psutil_prep(section: str, config: ConfigParser) -> bool:
 
 # Implementation mapping
 # This table provides the mapping from the type of the configuration to
-# the implementation of either the callbacks (in a dict), 
-# a function (function pointer), 
-# or a string to print
+# the implementation of either
+# - the callbacks (in a dict),
+# - a function (function pointer),
+# - or a string to print
 entry_type_implementation = {
-    "command"      : { CHECK : command_check, REPAIR : generic_repair },
-    "script"       : { CHECK : command_check, REPAIR : generic_repair },
-    "network"      : { CHECK : network_check, REPAIR : generic_repair },
-    "connectivity" : { CHECK : connectivity_check, REPAIR : generic_repair },
-    "mqtt"         : { PREP : mqtt_prep, CHECK : mqtt_check, REPAIR : generic_repair },
-    "device"       : "Entry type not implemented yet",
+    "command"      : { CHECK : command_check },
+    "network"      : { CHECK : network_check },
+    "connectivity" : { CHECK : connectivity_check },
+    "mqtt"         : { PREP : mqtt_prep, CHECK : mqtt_check },
 }
 
 if __name__ == '__main__':
