@@ -20,13 +20,17 @@ from __future__ import absolute_import
 
 from paho import mqtt
 from paho.mqtt import client as paho
-from paho.mqtt.subscribe import _on_message_callback, _on_connect
+from paho.mqtt.subscribe import _on_connect, _on_connect_v5
 from threading import Lock
 import time
 
 LOCK = 'lock'
 
-def _on_message_simple(client, userdata, message):
+def _on_message_callback(client, userdata, message):
+    """Internal callback"""
+    userdata['callback'](client, userdata['userdata'], message, userdata[LOCK])
+
+def _on_message_simple(client, userdata, message, lock):
     """Internal callback"""
 
 
@@ -42,14 +46,14 @@ def _on_message_simple(client, userdata, message):
     if userdata['messages'] is None and userdata['msg_count'] == 0:
         userdata['messages'] = message
         client.disconnect()
-        if LOCK in userdata:
-            userdata[LOCK].release()
+        if lock:
+            lock.release()
         return
 
     userdata['messages'].append(message)
     if userdata['msg_count'] == 0:
-        if LOCK in userdata:
-            userdata[LOCK].release()
+        if lock:
+            lock.release()
         client.disconnect()
 
 def callback(callback, topics, qos=0, userdata=None, hostname="localhost",
@@ -63,12 +67,12 @@ def callback(callback, topics, qos=0, userdata=None, hostname="localhost",
     lock = None
     if not timeout is None:
         lock = Lock()
-        userdata[LOCK] = lock
 
     callback_userdata = {
         'callback':callback,
         'topics':topics,
         'qos':qos,
+        LOCK:lock,
         'userdata':userdata}
 
     client = paho.Client(client_id=client_id, userdata=callback_userdata,
@@ -115,7 +119,6 @@ def callback(callback, topics, qos=0, userdata=None, hostname="localhost",
         lock.acquire()
         client.loop_start()
         lock.acquire(timeout=timeout)
-        del userdata[LOCK]
         client.loop_stop()
         client.disconnect()
 
