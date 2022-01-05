@@ -62,6 +62,9 @@ def check_prerequisites() -> None:
 # Optional: If no preparation is necessary, you can remove this function
 # and its reference in the dictionary that the function register() returns.
 def prepare_configuration(section: str, config: ConfigParser) -> None:
+    if not prerequisites_satisfied:
+        logging.warning("%s: Prerequisites not satisfied." % section)
+        return False
     logging.debug("Prepare configuration %s" % config_name)
     return True
 
