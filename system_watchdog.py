@@ -40,7 +40,6 @@ general_config = {
 }
 REPAIR = "repair"
 
-
 # Values for the entries of the different configurations
 COMMAND = "command"
 SERVER = "server"
@@ -69,9 +68,6 @@ primed_level = {
 
 # Plug-in related definitions
 PLUGIN_DIR = "plugins"
-# Prerequisites for different configuration types
-mqtt_import_available = False
-psutil_import_available = False
 
 def main(cmd_args: List[str]):
 
@@ -99,9 +95,6 @@ def main(cmd_args: List[str]):
             logging.error(err)
             logging.error("Cannot read config file. Aborting.")
             quit(1)
-
-    # Check the needed packages and set global variables accordingly
-    check_prerequisites()
 
     # Now interpret the config file
     # We should have one section that configures general values.
@@ -149,7 +142,7 @@ def main(cmd_args: List[str]):
             try:
                 module = importlib.import_module('.' + section_type, package=PLUGIN_DIR)
                 register_method = getattr(module, 'register')
-                entry = register_method(section_type)
+                entry = register_method(section_type, general_config)
                 if entry:
                     entry_type_implementation[section_type] = entry
                     logging.debug("%s: Import of module '%s' successful" % (section, section_type))
@@ -242,31 +235,6 @@ class SystemdHandler(logging.Handler):
             self.stream.flush()
         except Exception:
             self.handleError(record)
-
-def check_prerequisites() -> None:
-    global mqtt_import_available
-    global psutil_import_available
-
-    # Paho MQTT package
-    try:
-        #import paho.mqtt.client as mqtt
-        import paho.mqtt.subscribe as subscribe
-        mqtt_import_available = True
-        logging.debug("Optional MQTT package found.")
-    except ImportError or ModuleNotFoundError:
-        logging.debug("No MQTT implementation found. Use 'pip3 install paho-mqtt' to install.")
-        logging.debug("Continuing without MQTT support.")
-        pass
-
-    # PSUtil package
-    try:
-        import psutil
-        psutil_import_available = True
-        logging.debug("Optional PSUtil package found.")
-    except ImportError or ModuleNotFoundError:
-        logging.debug("PSUtil not found. Use 'pip3 install psutil' to install.")
-        logging.debug("Continuing without PSUtil support.")
-        pass
 
 # Generic thread implementations for the different watchdog entries
 # This is used if a dict of callbacks is used in the entry_type_implementation
@@ -407,7 +375,7 @@ def generic_exec(section: str, config: ConfigParser, command: str) -> int:
     cp = subprocess.run(shlex.split(command), capture_output=True)
     return cp.returncode
 
-# Implementation of the Command Callbacks
+# Implementation of the Command Callback
 def command_check(section: str, config: ConfigParser) -> int:
     cp = subprocess.run(shlex.split(config[COMMAND]), capture_output=True)
     return cp.returncode
@@ -457,88 +425,6 @@ def connectivity_check(section: str, config: ConfigParser) -> int:
     logging.debug("%s: No local ip address can be acquired." % section)
     return 1
 
-# Implementation of the MQTT callbacks
-def mqtt_prep(section: str, config: ConfigParser) -> bool:
-    if not mqtt_import_available:
-        logging.warning("%s: No MQTT implementation found. Use 'pip3 install paho-mqtt' to install." % section)
-        return False
-    if not SERVER in config:
-        logging.warning("%s: No '%s' option given. Aborting." % (section, SERVER))
-        return False
-    try:
-        server_ip = socket.getaddrinfo(config[SERVER], 1883)
-    except:
-        logging.warning("%s: Server name '%s' cannot be found. Aborting." % (section, config[SERVER]))
-        return False
-
-    if not TOPIC in config:
-        logging.warning("%s: No '%s' option given. Aborting." % (section, TOPIC))
-        return False
-    # config[TYPE] has already been checked
-    if not config[config[TYPE]] in config:
-        logging.warning("%s: No '%s' option given. Aborting." % (section, config[config[TYPE]]))
-        return False
-    # Do we have a credentials file?
-    if CREDENTIALS in config:
-        credentials = str(Path(__file__).parent.absolute()) + "/" + config[CREDENTIALS]
-        try:
-            with open (credentials, "r") as cred:
-                lines = []
-                for line in cred:
-                    line = line.partition(";")[0].strip(" \n\t");
-                    if line != "":
-                        lines.append(line)
-                config[USER] = lines[0]
-                config[PASSWORD] = lines[1]
-        except:
-            pass
-    return True
-
-def mqtt_check(section: str, config: ConfigParser) -> int:
-    import my_mqtt_subscribe as subscribe
-
-    port = 1883
-    if PORT in config:
-        try:
-            port = int(config[port])
-        except:
-            pass
-
-    if TIME_OUT in config:
-        timeout = int(config[TIME_OUT])
-    else:
-        timeout = general_config[TIME_OUT]
-
-    if ',' in config[TOPIC]:
-        topics = [ s.strip() for s in config[TOPIC].split(',')]
-    else:
-        topics = config[TOPIC]
-
-    auth = None
-    if USER in config:
-        auth = []
-        auth['username'] = config[USER]
-        if PASSWORD in config:
-            auth['password'] = config[PASSWORD]
-
-    try:
-        logging.debug("Connecting to MQTT server %s:%i" %(config[SERVER], port))
-        m = subscribe.simple(topics, hostname=config[SERVER], retained=True, timeout=timeout, auth=auth)
-        if m != None:
-            logging.debug("%s: Received MQTT message: '%s'" % (section, m.payload))
-            return 0
-        else:
-            logging.debug("%s: Received no MQTT message until timeout of %is" % (section, timeout))
-    except Exception as e:
-        logging.warning("%s: MQTT error occurred: %s" % (section, e))
-        raise
-    return 3
-
-
-# Implementation of the PSUtil callbacks
-def psutil_prep(section: str, config: ConfigParser) -> bool:
-    return psutil_import_available
-
 # Implementation mapping
 # This table provides the mapping from the type of the configuration to
 # the implementation of either
@@ -549,7 +435,6 @@ entry_type_implementation = {
     "command"      : { CHECK : command_check },
     "network"      : { CHECK : network_check },
     "connectivity" : { CHECK : connectivity_check },
-    "mqtt"         : { PREP : mqtt_prep, CHECK : mqtt_check },
 }
 
 if __name__ == '__main__':

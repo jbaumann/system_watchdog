@@ -11,12 +11,14 @@ FALLBACK = "fallback"
 
 # The name of our configuration type as it has been loaded by the system_watchdog
 config_name = ""
+general_config = None
 
 # This function is called by the system_watchdog to register the functions
 # this configuration implementation provides.
-def register(config_type: str) -> Dict[str, Callable]:
-    global config_name 
+def register(config_type: str, g_conf: Dict[str, Any]) -> Dict[str, Callable]:
+    global config_name, general_config
     config_name = config_type
+    general_config = g_conf
     logging.debug("registering implementation for '%s'", config_name)
     return {
         PREP: prepare_configuration,
