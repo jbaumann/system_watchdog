@@ -108,7 +108,7 @@ def prepare_configuration(section: str, config: ConfigParser) -> None:
 #
 # This function is mandatory
 def check_configuration(section: str, config: ConfigParser) -> int:
-    import my_mqtt_subscribe as subscribe
+    from . import my_mqtt_subscribe as subscribe
 
     logging.debug("%s: Checking configuration with option '%s'" 
             % (config_name, config[config_name]))
