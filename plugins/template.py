@@ -9,6 +9,10 @@ CHECK  = "check"
 REPAIR = "repair"
 FALLBACK = "fallback"
 
+# Values for general options
+TYPE = "type"
+TIME_OUT = "timeout"
+
 # The name of our configuration type as it has been loaded by the system_watchdog
 config_name = ""
 general_config = None

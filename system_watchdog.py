@@ -17,8 +17,8 @@ import threading
 from typing import Tuple, Dict, Any, Callable, List
 
 MAJOR = 1
-MINOR = 6
-PATCH = 2
+MINOR = 7
+PATCH = 3
 version = "%i.%i.%i" % (MAJOR, MINOR, PATCH)
 
 # Defaults for values in the general and other sections
@@ -338,7 +338,8 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                         return_code = generic_exec(section, config, config[REPAIR])
 
                 else:
-                    logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[REPAIR]))
+                    logging.debug("%s: Not executing '%s'. Primed value too low." 
+                            % (section, config[REPAIR]))
 
                 if return_code != 0:
                     logging.warning("%s: repair '%s' unsuccessful" % (section, config[REPAIR]))
@@ -380,51 +381,6 @@ def command_check(section: str, config: ConfigParser) -> int:
     cp = subprocess.run(shlex.split(config[COMMAND]), capture_output=True)
     return cp.returncode
 
-# Implementation of the Network Callbacks
-def network_check(section: str, config: ConfigParser) -> int:
-    interfaces = config[config[TYPE]].split();
-
-    result = 1
-    for if_name in interfaces:
-        # This implementation is Linux-specific.
-        # We could use netiface, but that would need an installation via pip
-        if_path = "/sys/class/net/" + if_name + "/flags"
-        if os.path.exists(if_path):
-            logging.debug("%s: Interface %s exists." % (section, if_name))
-            try:
-                with open(if_path, 'r') as file:
-                    data = file.read().rstrip()
-                    if int(data, 16) & 0x1:
-                        logging.debug("%s: Interface %s is active." % (section, if_name))
-                        result = 0
-                        break
-            except IOError:
-                pass
-        else:
-            logging.debug("%s: Interface %s does not exist." % (section, if_name))
-
-    return result
-
-# Implementation of the Connectivity Callbacks
-def connectivity_check(section: str, config: ConfigParser) -> int:
-    # This implementation is Linux-specific
-    ip_address = config[config[TYPE]]
-
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-        s.connect((ip_address, 1))  # connect() for UDP doesn't send packets
-        local_ip_address = s.getsockname()[0]
-        if local_ip_address != "0.0.0.0":
-            # success
-            logging.debug("%s: Local ip address is %s" % (section, local_ip_address))
-            return 0
-    except:
-        pass
-    # we could not get a local ip address
-    logging.debug("%s: No local ip address can be acquired." % section)
-    return 1
-
 # Implementation mapping
 # This table provides the mapping from the type of the configuration to
 # the implementation of either
@@ -433,8 +389,6 @@ def connectivity_check(section: str, config: ConfigParser) -> int:
 # - or a string to print
 entry_type_implementation = {
     "command"      : { CHECK : command_check },
-    "network"      : { CHECK : network_check },
-    "connectivity" : { CHECK : connectivity_check },
 }
 
 if __name__ == '__main__':

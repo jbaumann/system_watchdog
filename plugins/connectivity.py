@@ -1,5 +1,6 @@
 from configparser import ConfigParser
 import logging
+import socket
 from typing import Tuple, Dict, Any, Callable, List
 
 # Values for the dictionary that provides implementations for
@@ -9,13 +10,13 @@ CHECK  = "check"
 REPAIR = "repair"
 FALLBACK = "fallback"
 
-# The name of our configuration type as it has been loaded by the system_watchdog
-config_name = ""
-general_config = None
-
 # Values for general options
 TYPE = "type"
 TIME_OUT = "timeout"
+
+# The name of our configuration type as it has been loaded by the system_watchdog
+config_name = ""
+general_config = None
 
 # This function is called by the system_watchdog to register the functions
 # this configuration implementation provides.
@@ -40,4 +41,20 @@ def register(config_type: str, g_conf: Dict[str, Any]) -> Dict[str, Callable]:
 def check_configuration(section: str, config: ConfigParser) -> int:
     logging.debug("%s: Checking configuration with option '%s'"
             % (config_name, config[config_name]))
-    return 0
+    # This implementation is Linux-specific
+    ip_address = config[config[TYPE]]
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        s.connect((ip_address, 1))  # connect() for UDP doesn't send packets
+        local_ip_address = s.getsockname()[0]
+        if local_ip_address != "0.0.0.0":
+            # success
+            logging.debug("%s: Local ip address is %s" % (section, local_ip_address))
+            return 0
+    except:
+        pass
+    # we could not get a local ip address
+    logging.debug("%s: No local ip address can be acquired." % section)
+    return 1

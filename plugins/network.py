@@ -1,5 +1,6 @@
 from configparser import ConfigParser
 import logging
+import os
 from typing import Tuple, Dict, Any, Callable, List
 
 # Values for the dictionary that provides implementations for
@@ -40,4 +41,25 @@ def register(config_type: str, g_conf: Dict[str, Any]) -> Dict[str, Callable]:
 def check_configuration(section: str, config: ConfigParser) -> int:
     logging.debug("%s: Checking configuration with option '%s'"
             % (config_name, config[config_name]))
-    return 0
+    interfaces = config[config[TYPE]].split();
+
+    result = 1
+    for if_name in interfaces:
+        # This implementation is Linux-specific.
+        # We could use netiface, but that would need an installation via pip
+        if_path = "/sys/class/net/" + if_name + "/flags"
+        if os.path.exists(if_path):
+            logging.debug("%s: Interface %s exists." % (section, if_name))
+            try:
+                with open(if_path, 'r') as file:
+                    data = file.read().rstrip()
+                    if int(data, 16) & 0x1:
+                        logging.debug("%s: Interface %s is active." % (section, if_name))
+                        result = 0
+                        break
+            except IOError:
+                pass
+        else:
+            logging.debug("%s: Interface %s does not exist." % (section, if_name))
+
+    return result
