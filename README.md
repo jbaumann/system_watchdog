@@ -36,6 +36,13 @@ up and running. If none of the interfaces is up, then the *repair* action is exe
 
 For other types see the [Wiki](../../wiki).
 
+# Writing Your Own Plugins
+Actually, nearly all of the configuration types are implemented as plugins (the shortest of which has around 45 lines of code including comments). Templates allow you to very simply implement your own configuration types and thus add to the functionality of the System_Watchdog with minmimal effort.
+
+The following text explains how to do this:
+[Implementing Your Own Plugin](../../wiki/Walkthrough:-Implementing-Your-Own-Plugin)
+
+
 # The [general] Section
 In addition to the specific configurations one general section allows to define default values e.g., for the
 *fallback action*, the *timeout* or the *sleep time*. Here is a simple example:
