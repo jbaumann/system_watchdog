@@ -17,14 +17,14 @@ import threading
 from typing import Tuple, Dict, Any, Callable, List
 
 MAJOR = 1
-MINOR = 5
-PATCH = 1
+MINOR = 6
+PATCH = 2
 version = "%i.%i.%i" % (MAJOR, MINOR, PATCH)
 
-# Defaults for values in the general section
+# Defaults for values in the general and other sections
 GENERAL_SECTION = "general"
 PRIMED = "primed"
-FALLBACK_ACTION = "fallback action"
+FALLBACK = "fallback"
 LOG_LEVEL = "loglevel"
 SLEEP_TIME = "sleep time"
 TIME_OUT = "timeout"
@@ -32,12 +32,14 @@ TYPE = "type"
 VERSION = "version"
 general_config = {
     PRIMED : 0,
-    FALLBACK_ACTION : "sudo reboot",
+    FALLBACK : "sudo reboot",
     LOG_LEVEL : "DEBUG",
     SLEEP_TIME : 20,
     TIME_OUT : 120,
     VERSION : -1,
 }
+REPAIR = "repair"
+
 
 # Values for the entries of the different configurations
 COMMAND = "command"
@@ -49,12 +51,9 @@ USER = "user"
 PASSWORD = "password"
 
 # Values for the dictionary that provides implementations for
-# preparation, check and repair action
+# preparation, check and repair action if not already defined above
 PREP   = "prep"
 CHECK  = "check"
-REPAIR = "repair"
-FALLBACK = "fallback"
-
 
 # Values for mapping the different primed levels to numerical values
 UNPRIMED = "unprimed"
@@ -141,8 +140,8 @@ def main(cmd_args: List[str]):
         if TYPE not in config[section]:
             logging.warning("%s: No type defined in section. Ignoring section." % section)
             continue
-        if FALLBACK_ACTION not in config[section]:
-            config[section][FALLBACK_ACTION] = general_config[FALLBACK_ACTION]
+        if FALLBACK not in config[section]:
+            config[section][FALLBACK] = general_config[FALLBACK]
 
         section_type = config[section][TYPE]
         if section_type not in entry_type_implementation:
@@ -285,8 +284,13 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
         sleeptime = int(config[SLEEP_TIME])
     else:
         sleeptime = general_config[SLEEP_TIME]
-    
-    # verify the command and repair option are set in the config
+
+    # Verify that a check entry is in the callback dictionary
+    if not CHECK in callback:
+        logging.warning("%s: No check function registered by plugin. Aborting." % section)
+        return
+
+    # Verify that the type and repair option are set in the config
     msg = "%s: No '%s' option given."
     if config[TYPE] not in config:
         logging.warning((msg + " Aborting.") % (section, config[TYPE]))
@@ -363,7 +367,7 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
                     if REPAIR in callback:
                         return_code = callback[REPAIR](section, config)
                     else:
-                        return_code = generic_execute(section, config)
+                        return_code = generic_exec(section, config, config[REPAIR])
 
                 else:
                     logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[REPAIR]))
@@ -381,26 +385,26 @@ def thread_impl(section: str, callback: Dict[str, Callable], config: ConfigParse
 
                 if general_config[PRIMED] >= primed_level[FULLY_PRIMED]:
                     logging.warning("%s: Trying fallback action '%s'"
-                            % (section, config[FALLBACK_ACTION]))
+                            % (section, config[FALLBACK]))
 
-                    if FALLBACK_ACTION in callback:
-                        return_code = callback[FALLBACK_ACTION](section, config)
+                    if FALLBACK in callback:
+                        return_code = callback[FALLBACK](section, config)
                     else:
-                        return_code = generic_execute(section, config)
+                        return_code = generic_exec(section, config, config[FALLBACK])
 
                     if return_code != 0:
                         logging.warning("%s: Fallback action '%s' unsuccessful" 
-                                    % (section, config[FALLBACK_ACTION]))
+                                    % (section, config[FALLBACK]))
                 else:
-                    logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[FALLBACK_ACTION]))
+                    logging.debug("%s: Not executing '%s'. Primed value too low." % (section, config[FALLBACK]))
     except Exception as e:
         # if there was an exception we terminate this configuration
         logging.debug("%s: Exception occurred. Terminating: %s" % (section, e))
         pass
 
 # Implementation of the Callbacks
-def generic_execute(section: str, config: ConfigParser) -> int:
-    cp = subprocess.run(shlex.split(config[REPAIR]), capture_output=True)
+def generic_exec(section: str, config: ConfigParser, command: str) -> int:
+    cp = subprocess.run(shlex.split(command), capture_output=True)
     return cp.returncode
 
 # Implementation of the Command Callbacks
