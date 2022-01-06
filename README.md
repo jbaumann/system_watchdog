@@ -18,7 +18,7 @@ the following example (*command* and *network*):
 type = command
 command = /bin/ping -c 1 -t 10 8.8.8.8
 repair = sudo systemctl restart networking
-fallback action = sudo reboot
+fallback = sudo reboot
 timeout = 60
 
 [network]
